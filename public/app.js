@@ -1,47 +1,73 @@
 const $ = s => document.querySelector(s);
 const results = $('#results');
 const sidebar = $('#sidebar');
+let selectedFile = null;
+let map, marker, streetLayer, satelliteLayer;
 
-$('#hamb').addEventListener('click', () => sidebar.classList.toggle('open'));
-$('#githubTab').addEventListener('click', () => sidebar.classList.remove('open'));
-$('#username').addEventListener('keydown', e => { if (e.key === 'Enter') runRecon(); });
-$('#search').addEventListener('click', runRecon);
+$('#hamb').onclick = () => sidebar.classList.toggle('open');
+$('#imageTab').onclick = () => sidebar.classList.remove('open');
 
 function esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function date(v) { if (!v) return '—'; const d = new Date(v); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(); }
-function card(title, body, cls='') { return `<article class="card ${cls}"><div class="card-head"><h3>${title}</h3></div>${body}</article>`; }
+function fmt(v) { return v ? esc(v) : '<span class="muted">Not available</span>'; }
 
-async function runRecon() {
-  const username = $('#username').value.trim();
-  if (!/^[A-Za-z0-9-]{1,39}$/.test(username)) {
-    results.innerHTML = '<div class="empty error"><h2>Invalid username</h2><p>Use a valid GitHub username.</p></div>';
-    return;
-  }
-  const button = $('#search'); button.disabled = true; button.textContent = 'Scanning...';
-  results.innerHTML = `<div class="loading"><span></span><span></span><span></span><p>Querying GitHub public endpoints for <b>${esc(username)}</b>...</p></div>`;
-  try {
-    const r = await fetch(`/api/github?username=${encodeURIComponent(username)}`);
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'GitHub request failed');
-    render(data);
-  } catch (e) {
-    results.innerHTML = `<div class="empty error"><h2>Recon failed</h2><p>${esc(e.message)}</p></div>`;
-  } finally { button.disabled = false; button.textContent = 'Run Recon'; }
+function initMap() {
+  map = L.map('map', { zoomControl: true, worldCopyJump: true }).setView([20, 0], 2);
+  streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 });
+  satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 });
+  streetLayer.addTo(map);
+}
+initMap();
+
+function setLocation(lat, lon, label = 'Detected location') {
+  map.setView([lat, lon], 15, { animate: true });
+  if (marker) marker.remove();
+  marker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>${esc(label)}</b><br>${lat.toFixed(6)}, ${lon.toFixed(6)}`).openPopup();
+  $('#mapStatus').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 }
 
+$('#street').onclick = () => { if (!map.hasLayer(streetLayer)) { map.addLayer(streetLayer); map.removeLayer(satelliteLayer); } $('#street').classList.add('active'); $('#satellite').classList.remove('active'); };
+$('#satellite').onclick = () => { if (!map.hasLayer(satelliteLayer)) { map.addLayer(satelliteLayer); map.removeLayer(streetLayer); } $('#satellite').classList.add('active'); $('#street').classList.remove('active'); };
+$('#go').onclick = goCoords;
+$('#coords').onkeydown = e => { if (e.key === 'Enter') goCoords(); };
+function goCoords() {
+  const raw = $('#coords').value.trim();
+  const m = raw.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!m) return alert('Enter coordinates as latitude, longitude.');
+  const lat = Number(m[1]), lon = Number(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return alert('Coordinates are out of range.');
+  setLocation(lat, lon, 'Manual coordinate');
+}
+
+const drop = $('#drop');
+$('#image').onchange = e => selectFile(e.target.files[0]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
+drop.ondragleave = () => drop.classList.remove('drag');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('drag'); selectFile(e.dataTransfer.files[0]); };
+function selectFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return alert('Please select an image.');
+  if (file.size > 15 * 1024 * 1024) return alert('Image must be 15 MB or smaller.');
+  selectedFile = file;
+  $('#fileName').textContent = `${file.name} · ${(file.size / 1048576).toFixed(2)} MB`;
+  $('#analyze').disabled = false;
+}
+
+$('#analyze').onclick = async () => {
+  if (!selectedFile) return;
+  const button = $('#analyze'); button.disabled = true; button.textContent = 'Analyzing...';
+  results.innerHTML = '<div class="loading"><span></span><span></span><span></span><p>Reading image metadata locally through the server...</p></div>';
+  const form = new FormData(); form.append('image', selectedFile);
+  try {
+    const r = await fetch('/api/image-geolocate', { method: 'POST', body: form });
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Analysis failed');
+    render(d);
+    if (d.gps) setLocation(d.gps.latitude, d.gps.longitude, 'EXIF GPS');
+  } catch (e) { results.innerHTML = `<div class="empty error"><h2>Analysis failed</h2><p>${esc(e.message)}</p></div>`; }
+  finally { button.disabled = false; button.textContent = 'Analyze Image'; }
+};
+
 function render(d) {
-  const p = d.profile, repos = d.repos || [], events = d.events || [], gists = d.gists || [];
-  const repoRows = repos.map(r => `<div class="repo-row"><div><a href="${esc(r.html_url)}" target="_blank" rel="noopener">${esc(r.name)}</a><p>${esc(r.description || 'No description')}</p></div><div class="repo-meta"><span>${esc(r.language || 'Unknown')}</span><span>★ ${r.stargazers_count}</span><span>⑂ ${r.forks_count}</span></div></div>`).join('') || '<div class="muted">No public repositories.</div>';
-  const eventRows = events.map(e => `<div class="event"><div class="event-dot"></div><div><b>${esc(e.type)}</b><p>${e.repo ? `<a href="${esc(e.repo.url)}" target="_blank" rel="noopener">${esc(e.repo.name)}</a>` : 'GitHub'}</p></div><time>${date(e.created_at)}</time></div>`).join('') || '<div class="muted">No recent public events.</div>';
-  const gistRows = gists.map(g => `<div class="gist-row"><div><a href="${esc(g.html_url)}" target="_blank" rel="noopener">${esc(g.description || 'Untitled gist')}</a><p>${g.files.length} file${g.files.length === 1 ? '' : 's'} · ${g.public ? 'Public' : 'Private visibility'}</p></div><time>${date(g.updated_at)}</time></div>`).join('') || '<div class="muted">No public gists.</div>';
-  const avatar = p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="" class="avatar">` : '<div class="avatar fallback">GH</div>';
-  results.innerHTML = `
-    <div class="overview">${avatar}<div class="identity"><div class="handle">@${esc(p.login)}</div><h2>${esc(p.name || p.login)}</h2><p>${esc(p.bio || 'No public bio')}</p><a href="${esc(p.html_url)}" target="_blank" rel="noopener">Open GitHub profile ↗</a></div><div class="stats"><div><b>${p.public_repos}</b><span>Repos</span></div><div><b>${p.public_gists}</b><span>Gists</span></div><div><b>${p.followers}</b><span>Followers</span></div><div><b>${p.following}</b><span>Following</span></div></div></div>
-    <div class="grid two">
-      ${card('Profile Intelligence', `<dl><dt>GitHub ID</dt><dd>${esc(p.id)}</dd><dt>Location</dt><dd>${esc(p.location || 'Not public')}</dd><dt>Company</dt><dd>${esc(p.company || 'Not public')}</dd><dt>Website</dt><dd>${p.blog ? `<a href="${esc(p.blog)}" target="_blank" rel="noopener">${esc(p.blog)}</a>` : 'Not public'}</dd><dt>Public email</dt><dd>${p.public_email ? esc(p.public_email) : 'Not public'}</dd><dt>Twitter</dt><dd>${esc(p.twitter_username ? '@'+p.twitter_username : 'Not public')}</dd><dt>Created</dt><dd>${date(p.created_at)}</dd><dt>Updated</dt><dd>${date(p.updated_at)}</dd></dl>`)}
-      ${card('Repository Overview', `<div class="repo-list">${repoRows}</div>`)}
-      ${card('Public Activity', `<div class="timeline">${eventRows}</div>`)}
-      ${card('Public Gists', `<div class="gist-list">${gistRows}</div>`)}
-    </div>
-    <div class="notice"><b>Data scope</b><span>Only information returned by GitHub's public API is displayed. Repository results are capped at 100, public events at 30, and gists at 100.</span></div>`;
+  const meta = d.metadata || {};
+  const gps = d.gps ? `<div class="gps"><b>GPS coordinates detected</b><span>${d.gps.latitude.toFixed(6)}, ${d.gps.longitude.toFixed(6)}</span><button onclick="navigator.clipboard.writeText('${d.gps.latitude}, ${d.gps.longitude}')">Copy coordinates</button></div>` : '<div class="no-gps">No GPS coordinates are embedded in this image.</div>';
+  results.innerHTML = `<div class="result-grid"><article class="card"><div class="card-head"><h3>LOCATION SIGNAL</h3><span class="badge ${d.gps ? 'found' : ''}">${d.gps ? 'GPS FOUND' : 'NO GPS'}</span></div>${gps}<dl><dt>File</dt><dd>${esc(d.filename)}</dd><dt>Type</dt><dd>${esc(d.type)}</dd><dt>Size</dt><dd>${(d.size / 1048576).toFixed(2)} MB</dd></dl></article><article class="card"><div class="card-head"><h3>EXIF METADATA</h3></div><dl><dt>Camera</dt><dd>${fmt(meta.make)} ${fmt(meta.model)}</dd><dt>Lens</dt><dd>${fmt(meta.lens)}</dd><dt>Captured</dt><dd>${fmt(meta.captured)}</dd><dt>Modified</dt><dd>${fmt(meta.modified)}</dd><dt>Software</dt><dd>${fmt(meta.software)}</dd><dt>Orientation</dt><dd>${fmt(meta.orientation)}</dd></dl></article></div><article class="card"><div class="card-head"><h3>PUBLIC VISUAL SEARCH</h3></div><p class="note">${esc(d.note)}</p><div class="source-grid"><a href="https://lens.google.com/" target="_blank" rel="noopener">Google Lens</a><a href="https://www.bing.com/visualsearch" target="_blank" rel="noopener">Bing Visual Search</a><a href="https://tineye.com/" target="_blank" rel="noopener">TinEye</a></div></article>`;
 }
