@@ -1,1 +1,32 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>infosint</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head><body><div class="app"><aside class="left"><div class="brand">INFOSINT<span>_</span></div><button class="hamb" id="hamb">☰</button><nav id="nav"></nav></aside><main><header><div><small>PUBLIC DATA INTELLIGENCE</small><h1 id="title">Email Lookup</h1></div><div id="clock"></div></header><section id="content"></section></main><aside class="keys"><div class="key-head"><h2>API KEYS</h2><small>Render env vars are preferred</small></div><div id="keyList"></div></aside></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="/runtime.js"></script><script src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070a0f"><title>infosint — GitHub Recon</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">INFOSINT<span>_</span></div>
+      <div class="module-label">MODULE</div>
+      <button class="nav active" type="button"><span class="nav-icon">GH</span> GitHub Recon</button>
+      <div class="side-note">PUBLIC GITHUB INTELLIGENCE</div>
+    </aside>
+    <main>
+      <header>
+        <div><div class="eyebrow">OSINT / GITHUB RECON</div><h1>GitHub Recon</h1><p>Inspect publicly available GitHub account, repository, gist, and activity metadata.</p></div>
+        <div class="status"><i></i> API READY</div>
+      </header>
+      <section class="search-panel">
+        <label for="username">GitHub username</label>
+        <div class="search-row"><input id="username" maxlength="39" autocomplete="off" spellcheck="false" placeholder="octocat"><button id="search" class="primary">Run Recon</button></div>
+        <div class="hint">Optional: configure <code>GITHUB_TOKEN</code> on Render for a higher API rate limit.</div>
+      </section>
+      <div id="loading" class="loading hidden"><span></span><span></span><span></span> Querying GitHub API</div>
+      <section id="results" class="results empty"><div class="empty-icon">GH</div><h2>Ready for reconnaissance</h2><p>Enter a GitHub username to load the public profile, repositories, gists, and recent public activity.</p></section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
