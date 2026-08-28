@@ -1,32 +1,22 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#070a0f"><title>infosint — GitHub Recon</title>
-  <link rel="stylesheet" href="/styles.css">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>infosint — GitHub Recon</title><link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="brand">INFOSINT<span>_</span></div>
-      <div class="module-label">MODULE</div>
-      <button class="nav active" type="button"><span class="nav-icon">GH</span> GitHub Recon</button>
-      <div class="side-note">PUBLIC GITHUB INTELLIGENCE</div>
-    </aside>
-    <main>
-      <header>
-        <div><div class="eyebrow">OSINT / GITHUB RECON</div><h1>GitHub Recon</h1><p>Inspect publicly available GitHub account, repository, gist, and activity metadata.</p></div>
-        <div class="status"><i></i> API READY</div>
-      </header>
-      <section class="search-panel">
-        <label for="username">GitHub username</label>
-        <div class="search-row"><input id="username" maxlength="39" autocomplete="off" spellcheck="false" placeholder="octocat"><button id="search" class="primary">Run Recon</button></div>
-        <div class="hint">Optional: configure <code>GITHUB_TOKEN</code> on Render for a higher API rate limit.</div>
-      </section>
-      <div id="loading" class="loading hidden"><span></span><span></span><span></span> Querying GitHub API</div>
-      <section id="results" class="results empty"><div class="empty-icon">GH</div><h2>Ready for reconnaissance</h2><p>Enter a GitHub username to load the public profile, repositories, gists, and recent public activity.</p></section>
-    </main>
-  </div>
-  <script src="/app.js"></script>
-</body>
-</html>
+<div class="shell">
+<aside class="sidebar" id="sidebar">
+  <div class="brand"><span class="mark">GH</span><div>INFOSINT<small>GITHUB RECON</small></div></div>
+  <nav><button class="nav-item active" id="githubTab" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.24c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49v-1.72c-2.78.62-3.37-1.22-3.37-1.22-.45-1.2-1.11-1.52-1.11-1.52-.91-.64.07-.63.07-.63 1 .08 1.53 1.06 1.53 1.06.9 1.58 2.36 1.13 2.94.86.09-.67.35-1.13.64-1.39-2.22-.26-4.55-1.14-4.55-5.06 0-1.12.39-2.03 1.02-2.75-.1-.26-.44-1.3.1-2.7 0 0 .84-.28 2.75 1.05A9.17 9.17 0 0 1 12 7.1c.85 0 1.71.12 2.51.36 1.91-1.33 2.75-1.05 2.75-1.05.54 1.4.2 2.44.1 2.7.63.72 1.02 1.63 1.02 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.94.68 1.9v2.82c0 .27.18.6.69.49A10.25 10.25 0 0 0 22 12.24C22 6.58 17.52 2 12 2Z"/></svg>GitHub Recon</button></nav>
+  <div class="sidebar-foot">PUBLIC API DATA<br><span>ONE MODULE ACTIVE</span></div>
+</aside>
+<button class="hamb" id="hamb" aria-label="Open navigation"><span></span><span></span><span></span></button>
+<main class="main">
+<header><div><div class="eyebrow">OSINT / PUBLIC GITHUB DATA</div><h1>GitHub Recon</h1></div><div class="status"><i></i>API ONLINE</div></header>
+<section class="search-panel"><div class="search-title">TARGET USERNAME</div><div class="search-row"><input id="username" maxlength="39" autocomplete="off" spellcheck="false" placeholder="Enter a GitHub username"><button id="search">Run Recon</button></div><div class="hint">Queries GitHub public API endpoints for profile, repositories, public activity, and gists.</div></section>
+<section id="results" class="results"><div class="empty"><div class="empty-icon">GH</div><h2>Ready for reconnaissance</h2><p>Enter a public GitHub username to begin.</p></div></section>
+</main>
+</div>
+<script src="/app.js"></script>
+</body></html>
