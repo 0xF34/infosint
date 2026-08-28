@@ -4,116 +4,58 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const cache = { whm: null, whmAt: 0 };
 
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '32kb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-const envOrHeader = (env, req, name) => process.env[env] || req.get(name) || '';
-const safeFetch = async (url, options = {}) => {
-  const r = await fetch(url, { ...options, headers: { 'User-Agent': 'infosint/1.0', ...(options.headers || {}) } });
-  const text = await r.text();
-  let data; try { data = JSON.parse(text); } catch { data = text; }
-  if (!r.ok) throw new Error(`${r.status}: ${typeof data === 'string' ? data.slice(0, 180) : (data.message || 'upstream error')}`);
+async function githubFetch(url) {
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'infosint-github-recon/1.0' };
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const response = await fetch(url, { headers });
+  const text = await response.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+  if (!response.ok) {
+    const error = new Error(data?.message || `GitHub API returned ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
-};
+}
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'infosint' }));
-
-app.get('/api/ip', async (req, res) => {
-  try {
-    const ip = req.query.ip || '';
-    const geo = await safeFetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,isp,org,as,query`);
-    if (geo.status !== 'success') throw new Error(geo.message || 'IP lookup failed');
-    const out = { ...geo, enrichments: {} };
-    const ipinfo = envOrHeader('IPINFO_TOKEN', req, 'X-IPINFO-TOKEN');
-    if (ipinfo) { try { out.enrichments.ipinfo = await safeFetch(`https://ipinfo.io/${encodeURIComponent(geo.query)}/json?token=${encodeURIComponent(ipinfo)}`); } catch (e) { out.enrichments.ipinfoError = e.message; } }
-    const shodan = envOrHeader('SHODAN_API_KEY', req, 'X-SHODAN-KEY');
-    if (shodan) { try { out.enrichments.shodan = await safeFetch(`https://api.shodan.io/shodan/host/${encodeURIComponent(geo.query)}?key=${encodeURIComponent(shodan)}`); } catch (e) { out.enrichments.shodanError = e.message; } }
-    const vt = envOrHeader('VIRUSTOTAL_API_KEY', req, 'X-VT-KEY');
-    if (vt) { try { out.enrichments.virustotal = await safeFetch(`https://www.virustotal.com/api/v3/ip_addresses/${encodeURIComponent(geo.query)}`, { headers: { 'x-apikey': vt } }); } catch (e) { out.enrichments.virustotalError = e.message; } }
-    const abuse = envOrHeader('ABUSEIPDB_API_KEY', req, 'X-ABUSEIPDB-KEY');
-    if (abuse) { try { out.enrichments.abuseipdb = await safeFetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${encodeURIComponent(geo.query)}&maxAgeInDays=90`, { headers: { Key: abuse, Accept: 'application/json' } }); } catch (e) { out.enrichments.abuseipdbError = e.message; } }
-    res.json(out);
-  } catch (e) { res.status(502).json({ error: e.message }); }
-});
-
-app.get('/api/username', async (req, res) => {
-  try {
-    if (!cache.whm || Date.now() - cache.whmAt > 6 * 60 * 60 * 1000) {
-      cache.whm = await safeFetch('https://raw.githubusercontent.com/webbreacher/whatsmyname/main/web.json');
-      cache.whmAt = Date.now();
-    }
-    const username = String(req.query.username || '').trim();
-    if (!/^[a-zA-Z0-9._-]{1,64}$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
-    const sites = Array.isArray(cache.whm) ? cache.whm : (cache.whm.sites || cache.whm);
-    const definitions = sites.slice(0, 200);
-    const results = await Promise.all(definitions.map(async site => {
-      const name = site.name || site.id || 'Unknown';
-      const uri = site.uri_check || site.url || site.uri_pretty || '';
-      if (!uri) return { name, status: 'UNKNOWN', url: '' };
-      const url = uri.replace('{account}', encodeURIComponent(username)).replace('{username}', encodeURIComponent(username));
-      try {
-        const r = await fetch(url, { method: 'GET', redirect: 'manual', headers: { 'User-Agent': 'infosint/1.0' } });
-        const found = r.status >= 200 && r.status < 400 && r.status !== 404;
-        return { name, status: found ? 'FOUND' : 'NOT_FOUND', url: found ? url : '', favicon: site.favicon || '' };
-      } catch { return { name, status: 'UNKNOWN', url: '' }; }
-    }));
-    res.json({ username, total: results.length, found: results.filter(x => x.status === 'FOUND').length, results });
-  } catch (e) { res.status(502).json({ error: e.message }); }
-});
-
-app.get('/api/email', async (req, res) => {
-  const email = String(req.query.email || '').trim().toLowerCase();
-  if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email required' });
-  const out = { email, hibp: null, hunter: null };
-  try {
-    const key = envOrHeader('HIBP_API_KEY', req, 'X-HIBP-KEY');
-    if (key) out.hibp = await safeFetch(`https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`, { headers: { 'hibp-api-key': key, 'accept': 'application/json' } });
-    else out.hibp = { unavailable: true, message: 'HIBP_API_KEY is not configured' };
-  } catch (e) { out.hibp = { error: e.message }; }
-  const hunter = envOrHeader('HUNTER_API_KEY', req, 'X-HUNTER-KEY');
-  if (hunter) { try { out.hunter = await safeFetch(`https://hunter.io/v2/email-verifier?email=${encodeURIComponent(email)}&api_key=${encodeURIComponent(hunter)}`); } catch (e) { out.hunter = { error: e.message }; } }
-  else out.hunter = { unavailable: true, message: 'HUNTER_API_KEY is not configured' };
-  res.json(out);
-});
-
-app.get('/api/breach', async (req, res) => {
-  const query = String(req.query.query || '').trim();
-  if (!query) return res.status(400).json({ error: 'Email or domain required' });
-  if (!query.includes('@')) return res.status(400).json({ error: 'Domain-only breach enumeration is not enabled; enter an authorized email address.' });
-  const key = envOrHeader('HIBP_API_KEY', req, 'X-HIBP-KEY');
-  if (!key) return res.status(400).json({ error: 'HIBP_API_KEY is not configured' });
-  try { res.json({ query, breaches: await safeFetch(`https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(query)}?truncateResponse=false`, { headers: { 'hibp-api-key': key, accept: 'application/json' } }) }); }
-  catch (e) { res.status(502).json({ error: e.message }); }
-});
+app.get('/api/health', (_req, res) => res.json({ ok: true, module: 'github-recon' }));
 
 app.get('/api/github', async (req, res) => {
   const username = String(req.query.username || '').trim();
-  if (!/^[a-zA-Z0-9-]{1,39}$/.test(username)) return res.status(400).json({ error: 'Invalid GitHub username' });
-  try {
-    const h = {};
-    if (process.env.GITHUB_TOKEN) h.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-    const [profile, repos, events, gists] = await Promise.all([
-      safeFetch(`https://api.github.com/users/${encodeURIComponent(username)}`, { headers: h }),
-      safeFetch(`https://api.github.com/users/${encodeURIComponent(username)}/repos?per_page=100&sort=updated`, { headers: h }),
-      safeFetch(`https://api.github.com/users/${encodeURIComponent(username)}/events/public?per_page=30`, { headers: h }),
-      safeFetch(`https://api.github.com/users/${encodeURIComponent(username)}/gists?per_page=100`, { headers: h })
-    ]);
-    res.json({ profile, repos, events, gists: gists.map(g => ({ id: g.id, description: g.description, public: g.public, created_at: g.created_at, updated_at: g.updated_at, html_url: g.html_url, files: Object.keys(g.files || {}) })) });
-  } catch (e) { res.status(502).json({ error: e.message }); }
-});
+  if (!/^[a-zA-Z0-9-]{1,39}$/.test(username)) return res.status(400).json({ error: 'Enter a valid GitHub username.' });
 
-app.get('/api/discord', async (req, res) => {
-  const id = String(req.query.id || '').trim();
-  if (!/^\d{17,20}$/.test(id)) return res.status(400).json({ error: 'Valid Discord user ID required' });
-  const token = envOrHeader('DISCORD_BOT_TOKEN', req, 'X-DISCORD-TOKEN');
-  if (!token) return res.status(400).json({ error: 'DISCORD_BOT_TOKEN is not configured' });
   try {
-    const user = await safeFetch(`https://discord.com/api/v10/users/${id}`, { headers: { Authorization: `Bot ${token}` } });
-    res.json({ user });
-  } catch (e) { res.status(502).json({ error: e.message }); }
+    const base = `https://api.github.com/users/${encodeURIComponent(username)}`;
+    const [profile, repos, events, gists] = await Promise.all([
+      githubFetch(base),
+      githubFetch(`${base}/repos?per_page=100&sort=updated&type=all`),
+      githubFetch(`${base}/events/public?per_page=30`),
+      githubFetch(`${base}/gists?per_page=100`)
+    ]);
+
+    res.json({
+      profile: {
+        login: profile.login, id: profile.id, avatar_url: profile.avatar_url, html_url: profile.html_url,
+        name: profile.name, company: profile.company, blog: profile.blog, location: profile.location,
+        bio: profile.bio, public_email: profile.email || null, twitter_username: profile.twitter_username,
+        public_repos: profile.public_repos, public_gists: profile.public_gists, followers: profile.followers,
+        following: profile.following, created_at: profile.created_at, updated_at: profile.updated_at,
+        hireable: profile.hireable
+      },
+      repos: repos.map(r => ({ id:r.id,name:r.name,full_name:r.full_name,description:r.description,html_url:r.html_url,language:r.language,stargazers_count:r.stargazers_count,forks_count:r.forks_count,watchers_count:r.watchers_count,open_issues_count:r.open_issues_count,topics:r.topics||[],fork:r.fork,archived:r.archived,pushed_at:r.pushed_at,updated_at:r.updated_at })),
+      events: events.map(e => ({ id:e.id,type:e.type,created_at:e.created_at,repo:e.repo?{name:e.repo.name,url:`https://github.com/${e.repo.name}`}:null,action:e.payload?.action||null,ref:e.payload?.ref||null,issue:e.payload?.issue?{number:e.payload.issue.number,title:e.payload.issue.title,html_url:e.payload.issue.html_url}:null,pull_request:e.payload?.pull_request?{number:e.payload.pull_request.number,title:e.payload.pull_request.title,html_url:e.payload.pull_request.html_url}:null })),
+      gists: gists.map(g => ({ id:g.id,description:g.description,public:g.public,html_url:g.html_url,created_at:g.created_at,updated_at:g.updated_at,files:Object.keys(g.files||{}) })),
+      limits: { repos:'First 100 repositories', events:'Latest 30 public events', gists:'First 100 gists' }
+    });
+  } catch (error) {
+    res.status(error.status === 404 ? 404 : 502).json({ error: error.message });
+  }
 });
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
